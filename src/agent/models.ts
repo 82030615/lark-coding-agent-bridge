@@ -43,9 +43,26 @@ const CODEX_MODELS: ModelOption[] = [
   { value: 'o3', label: 'o3' },
 ];
 
+/**
+ * CodeBuddy Code models. Forwarded to `codebuddy --model`. Per project decision
+ * only `hy3` is exposed and used as the default — the picker names the exact id.
+ */
+const CODEBUDDY_MODELS: ModelOption[] = [{ value: 'hy3', label: 'HY3（最新）' }];
+
+/**
+ * Default model to select when a profile's stored preference is empty / the
+ * `'default'` sentinel. Claude and Codex keep `'default'` (omit `--model`, let
+ * the CLI/account decide); CodeBuddy always resolves to `hy3`.
+ */
+export function defaultModelFor(agentKind: AgentKind): string {
+  return agentKind === 'codebuddy' ? 'hy3' : DEFAULT_MODEL;
+}
+
 /** The model picker options for a profile's agent kind. */
 export function supportedModels(agentKind: AgentKind): ModelOption[] {
-  return agentKind === 'codex' ? CODEX_MODELS : CLAUDE_MODELS;
+  if (agentKind === 'codex') return CODEX_MODELS;
+  if (agentKind === 'codebuddy') return CODEBUDDY_MODELS;
+  return CLAUDE_MODELS;
 }
 
 /** True when the selection means "use the agent default" (no `--model`). */
@@ -64,10 +81,11 @@ export function normalizeModelSelection(
   agentKind: AgentKind,
   value: string | undefined,
 ): string {
-  if (isDefaultModel(value)) return DEFAULT_MODEL;
+  const fallback = defaultModelFor(agentKind);
+  if (isDefaultModel(value)) return fallback;
   return supportedModels(agentKind).some((m) => m.value === value)
     ? (value as string)
-    : DEFAULT_MODEL;
+    : fallback;
 }
 
 /**

@@ -77,7 +77,8 @@ export interface CreateProfileInput {
  */
 export async function onboardCreate(body: unknown, rootDir?: string) {
   const fv = asRecord(body);
-  const agentKind: AgentKind = fv.agentKind === 'codex' ? 'codex' : 'claude';
+  const agentKind: AgentKind =
+    fv.agentKind === 'codex' ? 'codex' : fv.agentKind === 'codebuddy' ? 'codebuddy' : 'claude';
   const input: CreateProfileInput = {
     profile: String(fv.profile ?? '').trim() || agentKind,
     agentKind,
@@ -136,6 +137,7 @@ export async function writeNewProfile(
       preferences: encrypted.preferences,
       secrets: encrypted.secrets,
       ...(input.workspace ? { workspace: input.workspace } : {}),
+      ...(input.agentKind === 'codebuddy' ? { codebuddyBinaryPath: undefined } : {}),
       defaultWorkspace: appPaths.defaultWorkspaceDir,
       profileDir: appPaths.profileDir,
     });

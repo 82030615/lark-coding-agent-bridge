@@ -123,12 +123,15 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
     if (catalogEntry?.agentId === 'claude') {
       sessionId = catalogEntry.sessionId;
       resumeFrom = sessionId;
+    } else if (catalogEntry?.agentId === 'codebuddy') {
+      sessionId = catalogEntry.sessionId;
+      resumeFrom = sessionId;
     } else if (catalogEntry?.agentId === 'codex') {
       threadId = catalogEntry.threadId;
       resumeFrom = threadId;
     }
   }
-  if (!resumeFrom && input.capability.agentId === 'claude') {
+  if (!resumeFrom && (input.capability.agentId === 'claude' || input.capability.agentId === 'codebuddy')) {
     resumeFrom = input.sessions.resumeFor(input.scopeId, workspace.cwdRealpath);
     sessionId = resumeFrom;
     const stale = input.sessions.getRaw(input.scopeId);
@@ -194,6 +197,18 @@ export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
     input.sessionCatalog?.upsertActive({
       scopeId: input.scopeId,
       agentId: 'claude',
+      cwdRealpath,
+      policyFingerprint: input.policy.policyFingerprint,
+      sessionId: input.event.sessionId,
+    });
+    return;
+  }
+  if (input.capability.agentId === 'codebuddy' && input.event.sessionId) {
+    const cwdRealpath = input.event.cwd ?? input.policy.cwdRealpath;
+    input.sessions.set(input.scopeId, input.event.sessionId, cwdRealpath);
+    input.sessionCatalog?.upsertActive({
+      scopeId: input.scopeId,
+      agentId: 'codebuddy',
       cwdRealpath,
       policyFingerprint: input.policy.policyFingerprint,
       sessionId: input.event.sessionId,

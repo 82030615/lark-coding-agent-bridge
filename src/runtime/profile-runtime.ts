@@ -613,7 +613,9 @@ class UserCancelledError extends Error {
 }
 
 function displayAgentKind(kind: AgentKind): string {
-  return kind === 'claude' ? 'Claude Code' : 'Codex CLI';
+  if (kind === 'claude') return 'Claude Code';
+  if (kind === 'codebuddy') return 'CodeBuddy Code';
+  return 'Codex CLI';
 }
 
 async function maybeMigrateRootPlaintextSecret(
