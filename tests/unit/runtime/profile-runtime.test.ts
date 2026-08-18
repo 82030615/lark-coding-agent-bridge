@@ -167,6 +167,42 @@ describe('profile runtime resolver', () => {
     });
   });
 
+  it('bootstraps a codebuddy profile (not claude) when codebuddy is the detected agent and no --agent is passed', async () => {
+    const root = await tmpRoot();
+    const bin = join(root, 'bin');
+    const codebuddy = await writeVersionExecutable(bin, 'codebuddy', 'codebuddy 2.0');
+    const oldPath = process.env.PATH;
+    const oldClaude = process.env.LARK_CHANNEL_CLAUDE_BIN;
+    const oldCodex = process.env.LARK_CHANNEL_CODEX_BIN;
+    const oldCodebuddy = process.env.LARK_CHANNEL_CODEBUDDY_BIN;
+    process.env.PATH = bin;
+    process.env.LARK_CHANNEL_CLAUDE_BIN = 'missing-claude';
+    process.env.LARK_CHANNEL_CODEX_BIN = 'missing-codex';
+    process.env.LARK_CHANNEL_CODEBUDDY_BIN = codebuddy;
+    try {
+      const runtime = await resolveProfileRuntime({
+        config: join(root, 'config.json'),
+        allowBootstrap: true,
+        appId: 'cli_codebuddy',
+        appSecret: 'manual-secret',
+        tenant: 'feishu',
+      } as Parameters<typeof resolveProfileRuntime>[0] & {
+        appId: string;
+        appSecret: string;
+        tenant: 'feishu';
+      });
+
+      expect(runtime.profile).toBe('codebuddy');
+      expect(runtime.profileConfig.agentKind).toBe('codebuddy');
+      expect(runtime.profileConfig.codebuddy).toMatchObject({ binaryPath: codebuddy });
+    } finally {
+      process.env.PATH = oldPath;
+      resetEnv(oldClaude, 'LARK_CHANNEL_CLAUDE_BIN');
+      resetEnv(oldCodex, 'LARK_CHANNEL_CODEX_BIN');
+      resetEnv(oldCodebuddy, 'LARK_CHANNEL_CODEBUDDY_BIN');
+    }
+  });
+
   it('fails clearly instead of opening the QR wizard during non-interactive first run', async () => {
     const root = await tmpRoot();
 
@@ -1157,6 +1193,11 @@ async function tmpRoot(): Promise<string> {
 
 async function writeExecutable(root: string, name: string): Promise<string> {
   return writeVersionExecutable(root, name, 'ok');
+}
+
+function resetEnv(prev: string | undefined, key: string): void {
+  if (prev === undefined) delete process.env[key];
+  else process.env[key] = prev;
 }
 
 function expectedSecretsGetter(root: string): string {

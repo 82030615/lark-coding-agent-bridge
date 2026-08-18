@@ -395,7 +395,11 @@ function resolveBootstrapAgent(
   requestedAgent: AgentKind | undefined,
   profile: string | undefined,
 ): AgentKind | undefined {
-  return requestedAgent ?? (profile === 'codex' ? 'codex' : undefined);
+  if (requestedAgent) return requestedAgent;
+  // During bootstrap, `profile` is the agent kind the user selected/detected
+  // (e.g. "codebuddy"), so it doubles as the agentKind to initialize.
+  if (profile === 'codex' || profile === 'codebuddy' || profile === 'claude') return profile;
+  return undefined;
 }
 
 async function hasLegacyConfig(configPath: string): Promise<boolean> {
