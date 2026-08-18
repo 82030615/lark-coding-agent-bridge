@@ -51,12 +51,15 @@ export function createRuntimeAgent(
     });
   }
   if (profileConfig.agentKind === 'codebuddy') {
+    // The codebuddy binary config may be absent on profiles created before the
+    // bootstrap wrote it (or when the binary is simply on PATH). Fall back to
+    // the env override / bare `codebuddy`, which `checkAgentAvailability` and
+    // the spawn layer resolve via PATH — never hard-fail on a missing path.
     const codebuddy = profileConfig.codebuddy;
-    if (!codebuddy?.binaryPath) {
-      throw new Error('codebuddy profile requires codebuddy.binaryPath');
-    }
+    const binary =
+      codebuddy?.binaryPath ?? process.env.LARK_CHANNEL_CODEBUDDY_BIN ?? 'codebuddy';
     return new CodeBuddyAdapter({
-      binary: codebuddy.binaryPath,
+      binary,
       larkChannel,
     });
   }
