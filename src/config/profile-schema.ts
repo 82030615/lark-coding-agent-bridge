@@ -267,9 +267,13 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   if (raw.agentKind === 'codex' && !raw.codex) {
     throw new Error('codex profile requires codex configuration');
   }
-  if (raw.agentKind === 'codebuddy' && !raw.codebuddy) {
-    throw new Error('codebuddy profile requires codebuddy configuration');
-  }
+  // A stored codebuddy binary config is optional: the binary is resolved from
+  // PATH at runtime (LARK_CHANNEL_CODEBUDDY_BIN / bare `codebuddy`). Synthesize
+  // a default so the profile is valid and consistent instead of hard-failing.
+  const effectiveCodebuddy =
+    raw.agentKind === 'codebuddy' && !raw.codebuddy
+      ? { binaryPath: process.env.LARK_CHANNEL_CODEBUDDY_BIN ?? 'codebuddy' }
+      : raw.codebuddy;
 
   const preferences = normalizePreferences(raw.preferences);
   const access = normalizeAccess(
@@ -299,7 +303,9 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     permissions,
     permissionSource,
     ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
-    ...(raw.codebuddy ? { codebuddy: normalizeCodeBuddy(raw.codebuddy) } : {}),
+    ...(effectiveCodebuddy
+      ? { codebuddy: normalizeCodeBuddy(effectiveCodebuddy) }
+      : {}),
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
       maxBytes: numberOr(raw.attachments?.maxBytes, 100 * 1024 * 1024),
