@@ -72,6 +72,18 @@ export interface RecordRunSessionEventInput {
   capability: AgentCapability;
   policy: RunPolicyAllow;
   event: AgentEvent;
+  /**
+   * codebuddy only. Whether a later `system`/`init` event may overwrite the
+   * session already recorded for this run. Defaults to true.
+   *
+   * CodeBuddy emits subagent `init` events (a fresh `sessionId`) into the
+   * parent stdout stream. Adopting them would clobber the real top-level
+   * session, so the bridge sets this to false after adopting the first
+   * top-level init (first-init-wins). Claude never surfaces subagent activity
+   * as `system`/`init` with a new sessionId (it uses `parent_tool_use_id`), so
+   * its path ignores this flag entirely.
+   */
+  allowOverwrite?: boolean;
 }
 
 export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFlowResult> {
@@ -204,6 +216,9 @@ export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
     return;
   }
   if (input.capability.agentId === 'codebuddy' && input.event.sessionId) {
+    // first-init-wins: ignore subagent `init` events once a top-level session
+    // has been adopted for this run.
+    if (input.allowOverwrite === false) return;
     const cwdRealpath = input.event.cwd ?? input.policy.cwdRealpath;
     input.sessions.set(input.scopeId, input.event.sessionId, cwdRealpath);
     input.sessionCatalog?.upsertActive({

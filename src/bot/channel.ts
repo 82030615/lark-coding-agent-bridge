@@ -1002,7 +1002,14 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   } else {
     log.info('session', 'fresh', { cwd });
   }
+  // codebuddy emits subagent `init` events (fresh sessionId) into the parent
+  // stream. Track whether the real top-level session for this run has already
+  // been adopted so later init events can't clobber it (first-init-wins).
+  let codebuddyTopLevelSessionAdopted = false;
   const recordSession = (evt: AgentEvent): void => {
+    const isCodebuddyInit =
+      capability.agentId === 'codebuddy' && evt.type === 'system' && Boolean(evt.sessionId);
+    const allowOverwrite = !(isCodebuddyInit && codebuddyTopLevelSessionAdopted);
     recordRunSessionEvent({
       scopeId: scope,
       sessions,
@@ -1010,7 +1017,9 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       capability,
       policy: flow.policy,
       event: evt,
+      allowOverwrite,
     });
+    if (isCodebuddyInit) codebuddyTopLevelSessionAdopted = true;
     if (evt.type === 'system' && evt.sessionId) {
       log.info('session', 'set', { sessionId: evt.sessionId });
     }

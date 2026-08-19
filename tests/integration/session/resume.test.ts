@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { claudeCapability, codexCapability } from '../../../src/agent/capability.js';
+import { claudeCapability, codebuddyCapability, codexCapability } from '../../../src/agent/capability.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import {
@@ -172,9 +172,91 @@ describe('agent-aware run-flow resume', () => {
     ).toMatchObject({ threadId: 'thread-recorded' });
     expect(codex.sessions.getRaw('chat-1')).toBeUndefined();
   });
+
+  it('codebuddy: first-init-wins keeps the top-level session over a subagent init', async () => {
+    const h = await createHarness('codebuddy');
+    const run = await start(h);
+    expect(run.ok).toBe(true);
+    if (!run.ok) throw new Error('expected codebuddy run');
+    await collect(run.execution.subscribe());
+    const cwd = run.cwdRealpath;
+
+    // Top-level init (real session).
+    recordRunSessionEvent({
+      scopeId: 'chat-1',
+      sessions: h.sessions,
+      sessionCatalog: h.catalog,
+      capability: codebuddyCapability(h.profileConfig),
+      policy: run.policy,
+      event: { type: 'system', sessionId: 'TOP-LEVEL', cwd },
+      allowOverwrite: true,
+    });
+
+    // Later subagent init must NOT clobber the top-level session.
+    recordRunSessionEvent({
+      scopeId: 'chat-1',
+      sessions: h.sessions,
+      sessionCatalog: h.catalog,
+      capability: codebuddyCapability(h.profileConfig),
+      policy: run.policy,
+      event: { type: 'system', sessionId: 'SUBAGENT', cwd },
+      allowOverwrite: false,
+    });
+
+    expect(h.sessions.resumeFor('chat-1', cwd)).toBe('TOP-LEVEL');
+    expect(
+      h.catalog.activeFor({
+        scopeId: 'chat-1',
+        agentId: 'codebuddy',
+        cwdRealpath: cwd,
+        policyFingerprint: run.policy.policyFingerprint,
+      }),
+    ).toMatchObject({ sessionId: 'TOP-LEVEL' });
+  });
+
+  it('claude: allowOverwrite flag is ignored and later init still overwrites (regression guard)', async () => {
+    const h = await createHarness('claude');
+    const run = await start(h);
+    expect(run.ok).toBe(true);
+    if (!run.ok) throw new Error('expected claude run');
+    await collect(run.execution.subscribe());
+    const cwd = run.cwdRealpath;
+
+    recordRunSessionEvent({
+      scopeId: 'chat-1',
+      sessions: h.sessions,
+      sessionCatalog: h.catalog,
+      capability: claudeCapability(h.profileConfig),
+      policy: run.policy,
+      event: { type: 'system', sessionId: 'FIRST', cwd },
+    });
+
+    // For claude, allowOverwrite:false must NOT suppress the overwrite — the
+    // claude path ignores the flag entirely (its subagents don't emit
+    // system/init with a new sessionId).
+    recordRunSessionEvent({
+      scopeId: 'chat-1',
+      sessions: h.sessions,
+      sessionCatalog: h.catalog,
+      capability: claudeCapability(h.profileConfig),
+      policy: run.policy,
+      event: { type: 'system', sessionId: 'SECOND', cwd },
+      allowOverwrite: false,
+    });
+
+    expect(h.sessions.resumeFor('chat-1', cwd)).toBe('SECOND');
+    expect(
+      h.catalog.activeFor({
+        scopeId: 'chat-1',
+        agentId: 'claude',
+        cwdRealpath: cwd,
+        policyFingerprint: run.policy.policyFingerprint,
+      }),
+    ).toMatchObject({ sessionId: 'SECOND' });
+  });
 });
 
-async function createHarness(agentKind: 'claude' | 'codex'): Promise<{
+async function createHarness(agentKind: 'claude' | 'codex' | 'codebuddy'): Promise<{
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
   executor: RunExecutor;
@@ -247,7 +329,9 @@ async function start(h: Awaited<ReturnType<typeof createHarness>>) {
     capability:
       h.profileConfig.agentKind === 'codex'
         ? codexCapability(h.profileConfig)
-        : claudeCapability(h.profileConfig),
+        : h.profileConfig.agentKind === 'codebuddy'
+          ? codebuddyCapability(h.profileConfig)
+          : claudeCapability(h.profileConfig),
     profileConfig: h.profileConfig,
     sessions: h.sessions,
     sessionCatalog: h.catalog,
