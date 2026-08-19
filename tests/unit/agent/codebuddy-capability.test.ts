@@ -41,10 +41,10 @@ describe('CodeBuddy capability contract', () => {
     });
   });
 
-  it('exposes only the hy3 CodeBuddy model and accepts the codebuddy agent kind', () => {
+  it('exposes only the deepseek-v4-flash CodeBuddy model and accepts the codebuddy agent kind', () => {
     expect(agentKindFromString('codebuddy')).toBe('codebuddy');
     const models = supportedModels('codebuddy');
-    expect(models).toEqual([{ value: 'hy3', label: 'HY3（最新）' }]);
+    expect(models).toEqual([{ value: 'deepseek-v4-flash', label: 'Deepseek V4 Flash（最新）' }]);
     expect(models.some((m) => m.value === 'glm-5.3')).toBe(false);
     // Claude/Codex lists must be untouched.
     expect(supportedModels('claude').some((m) => m.value === 'claude-opus-4-8')).toBe(true);
