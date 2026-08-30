@@ -41,12 +41,15 @@ describe('CodeBuddy capability contract', () => {
     });
   });
 
-  it('exposes the hy3 (default) and deepseek-v4-flash CodeBuddy models and accepts the codebuddy agent kind', () => {
+  it('exposes the hy4-preview (default) and other CodeBuddy models and accepts the codebuddy agent kind', () => {
     expect(agentKindFromString('codebuddy')).toBe('codebuddy');
     const models = supportedModels('codebuddy');
     expect(models).toEqual([
-      { value: 'hy3', label: 'HY3（最新）' },
-      { value: 'deepseek-v4-flash', label: 'Deepseek V4 Flash' },
+      { value: 'hy4-preview', label: 'Hy4 preview' },
+      { value: 'hy3', label: 'HY3' },
+      { value: 'hy3-x', label: 'Hy3-x-0.05' },
+      { value: 'glm-5.3-flash', label: 'GLM-5.3-Flash-0.06' },
+      { value: 'deepseek-v4-flash', label: 'Deepseek-V4-Flash-0.17' },
     ]);
     expect(models.some((m) => m.value === 'glm-5.3')).toBe(false);
     // Claude/Codex lists must be untouched.

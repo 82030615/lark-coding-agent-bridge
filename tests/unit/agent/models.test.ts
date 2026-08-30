@@ -47,21 +47,27 @@ describe('agent model catalog', () => {
     expect(modelLabel('claude', DEFAULT_MODEL)).toContain('跟随默认');
   });
 
-  it('exposes hy3 as the default and deepseek-v4-flash as an alternative', () => {
-    expect(defaultModelFor('codebuddy')).toBe('hy3');
+  it('exposes hy4-preview as the default and the other CodeBuddy models as alternatives', () => {
+    expect(defaultModelFor('codebuddy')).toBe('hy4-preview');
     expect(supportedModels('codebuddy')).toEqual([
-      { value: 'hy3', label: 'HY3（最新）' },
-      { value: 'deepseek-v4-flash', label: 'Deepseek V4 Flash' },
+      { value: 'hy4-preview', label: 'Hy4 preview' },
+      { value: 'hy3', label: 'HY3' },
+      { value: 'hy3-x', label: 'Hy3-x-0.05' },
+      { value: 'glm-5.3-flash', label: 'GLM-5.3-Flash-0.06' },
+      { value: 'deepseek-v4-flash', label: 'Deepseek-V4-Flash-0.17' },
     ]);
-    // Unset / default sentinel / unknown model all resolve to the CodeBuddy default (hy3).
-    expect(normalizeModelSelection('codebuddy', undefined)).toBe('hy3');
-    expect(normalizeModelSelection('codebuddy', DEFAULT_MODEL)).toBe('hy3');
-    expect(normalizeModelSelection('codebuddy', 'glm-5.3')).toBe('hy3');
-    // hy3 is passed explicitly (never omitted) — it is the definitive default.
+    // Unset / default sentinel / unknown model all resolve to the CodeBuddy default (hy4-preview).
+    expect(normalizeModelSelection('codebuddy', undefined)).toBe('hy4-preview');
+    expect(normalizeModelSelection('codebuddy', DEFAULT_MODEL)).toBe('hy4-preview');
+    expect(normalizeModelSelection('codebuddy', 'glm-5.3')).toBe('hy4-preview');
+    // hy4-preview is passed explicitly (never omitted) — it is the definitive default.
+    expect(resolveModelArg('codebuddy', 'hy4-preview')).toBe('hy4-preview');
+    expect(resolveModelArg('codebuddy', undefined)).toBe('hy4-preview');
+    expect(modelLabel('codebuddy', 'hy4-preview')).toBe('Hy4 preview');
+    // The alternative models are also selectable.
     expect(resolveModelArg('codebuddy', 'hy3')).toBe('hy3');
-    expect(resolveModelArg('codebuddy', undefined)).toBe('hy3');
-    expect(modelLabel('codebuddy', 'hy3')).toBe('HY3（最新）');
-    // The alternative model is also selectable.
+    expect(resolveModelArg('codebuddy', 'hy3-x')).toBe('hy3-x');
+    expect(resolveModelArg('codebuddy', 'glm-5.3-flash')).toBe('glm-5.3-flash');
     expect(resolveModelArg('codebuddy', 'deepseek-v4-flash')).toBe('deepseek-v4-flash');
   });
 });

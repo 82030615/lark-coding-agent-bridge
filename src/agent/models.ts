@@ -44,22 +44,25 @@ const CODEX_MODELS: ModelOption[] = [
 ];
 
 /**
- * CodeBuddy Code models. Forwarded to `codebuddy --model`. `hy3` is the default
- * and `deepseek-v4-flash` is offered as an alternative — the picker names each
+ * CodeBuddy Code models. Forwarded to `codebuddy --model`. `hy4-preview` is the
+ * default and the rest are offered as alternatives — the picker names each
  * exact id.
  */
 const CODEBUDDY_MODELS: ModelOption[] = [
-  { value: 'hy3', label: 'HY3（最新）' },
-  { value: 'deepseek-v4-flash', label: 'Deepseek V4 Flash' },
+  { value: 'hy4-preview', label: 'Hy4 preview' },
+  { value: 'hy3', label: 'HY3' },
+  { value: 'hy3-x', label: 'Hy3-x-0.05' },
+  { value: 'glm-5.3-flash', label: 'GLM-5.3-Flash-0.06' },
+  { value: 'deepseek-v4-flash', label: 'Deepseek-V4-Flash-0.17' },
 ];
 
 /**
  * Default model to select when a profile's stored preference is empty / the
  * `'default'` sentinel. Claude and Codex keep `'default'` (omit `--model`, let
- * the CLI/account decide); CodeBuddy always resolves to `hy3`.
+ * the CLI/account decide); CodeBuddy always resolves to `hy4-preview`.
  */
 export function defaultModelFor(agentKind: AgentKind): string {
-  return agentKind === 'codebuddy' ? 'hy3' : DEFAULT_MODEL;
+  return agentKind === 'codebuddy' ? 'hy4-preview' : DEFAULT_MODEL;
 }
 
 /** The model picker options for a profile's agent kind. */
