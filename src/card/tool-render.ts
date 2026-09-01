@@ -13,7 +13,8 @@ const OUTPUT_MAX = 1200;
 const BODY_TOTAL_MAX = 2500;
 
 export function toolHeaderText(tool: ToolEntry): string {
-  const icon = tool.status === 'done' ? '✅' : tool.status === 'error' ? '❌' : '⏳';
+  const icon =
+    tool.status === 'done' ? '✅' : tool.status === 'error' ? '❌' : tool.status === 'lost' ? '⚠️' : '⏳';
   const summary = summarizeInput(tool.name, tool.input);
   return summary ? `${icon} **${tool.name}** — ${summary}` : `${icon} **${tool.name}**`;
 }
@@ -34,6 +35,8 @@ export function toolBodyMd(tool: ToolEntry): string {
     }
   } else if (tool.status === 'running') {
     parts.push('_运行中…_');
+  } else if (tool.status === 'lost') {
+    parts.push('_结果未返回（调用已结束，但未收到该工具返回）_');
   }
 
   const body = parts.join('\n\n');

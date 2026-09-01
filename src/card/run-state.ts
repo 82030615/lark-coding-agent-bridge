@@ -1,6 +1,6 @@
 import type { AgentEvent } from '../agent/types';
 
-export type ToolStatus = 'running' | 'done' | 'error';
+export type ToolStatus = 'running' | 'done' | 'error' | 'lost';
 
 export interface ToolEntry {
   id: string;
@@ -40,6 +40,30 @@ function closeStreamingText(blocks: Block[]): Block[] {
   return blocks.map((b) =>
     b.kind === 'text' && b.streaming ? { ...b, streaming: false } : b,
   );
+}
+
+/**
+ * At a terminal state, flip any tool block still in `running` to `lost`.
+ *
+ * A `tool_use` that never received its matching `tool_result` means the
+ * tool's outcome is unknown — the result was dropped in transit, or the run
+ * was cut off mid-call. Neither `done` (would falsely imply success) nor
+ * `error` (would falsely imply the tool itself failed) is honest, so we mark
+ * it `lost`. This is what stops a finished run from leaving a perpetual
+ * "正在调用工具 / 运行中…" spinner on the card.
+ */
+export function settleRunningTools(state: RunState): RunState {
+  if (!state.blocks.some((b) => b.kind === 'tool' && b.tool.status === 'running')) {
+    return state;
+  }
+  return {
+    ...state,
+    blocks: state.blocks.map((b) =>
+      b.kind === 'tool' && b.tool.status === 'running'
+        ? { ...b, tool: { ...b.tool, status: 'lost' as const } }
+        : b,
+    ),
+  };
 }
 
 export function reduce(state: RunState, evt: AgentEvent): RunState {
@@ -111,12 +135,12 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
           : evt.terminationReason === 'timeout'
             ? 'idle_timeout'
             : 'error';
-      return {
+      return settleRunningTools({
         ...state,
         terminal,
         errorMsg: terminal === 'error' ? evt.message : state.errorMsg,
         footer: null,
-      };
+      });
     }
 
     case 'done': {
@@ -126,13 +150,13 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
           : evt.terminationReason === 'timeout'
             ? 'idle_timeout'
             : 'done';
-      return {
+      return settleRunningTools({
         ...state,
         blocks: closeStreamingText(state.blocks),
         reasoning: { ...state.reasoning, active: false },
         terminal,
         footer: null,
-      };
+      });
     }
 
     default:
@@ -141,33 +165,33 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
 }
 
 export function markInterrupted(state: RunState): RunState {
-  return {
+  return settleRunningTools({
     ...state,
     blocks: closeStreamingText(state.blocks),
     reasoning: { ...state.reasoning, active: false },
     terminal: 'interrupted',
     footer: null,
-  };
+  });
 }
 
 export function markIdleTimeout(state: RunState, minutes: number): RunState {
-  return {
+  return settleRunningTools({
     ...state,
     blocks: closeStreamingText(state.blocks),
     reasoning: { ...state.reasoning, active: false },
     terminal: 'idle_timeout',
     footer: null,
     idleTimeoutMinutes: minutes,
-  };
+  });
 }
 
 export function finalizeIfRunning(state: RunState): RunState {
   if (state.terminal !== 'running') return state;
-  return {
+  return settleRunningTools({
     ...state,
     blocks: closeStreamingText(state.blocks),
     reasoning: { ...state.reasoning, active: false },
     terminal: 'done',
     footer: null,
-  };
+  });
 }

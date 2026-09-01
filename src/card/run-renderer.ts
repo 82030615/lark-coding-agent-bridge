@@ -111,7 +111,7 @@ function toolPanel(tool: ToolEntry, expanded: boolean): object {
   return collapsiblePanel({
     title: toolHeaderText(tool),
     expanded,
-    border: tool.status === 'error' ? 'red' : 'grey',
+    border: tool.status === 'error' ? 'red' : tool.status === 'lost' ? 'blue' : 'grey',
     body: toolBodyMd(tool) || '_无输出_',
   });
 }
