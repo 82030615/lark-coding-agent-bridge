@@ -1182,6 +1182,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           fallback: async (state) => {
             if (controls.profileConfig.agentKind === 'codex') return;
             if (renderText(filterForPrefs(state)).trim() === '') return;
+            const frozenMid = streamCardMessageId(cardCtrl);
+            if (frozenMid) await channel.recallMessage(frozenMid).catch(() => {});
             await sendWithWithdrawnReplyFallback(
               channel,
               chatId,
@@ -1250,6 +1252,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
             if (controls.profileConfig.agentKind === 'codex') return;
             const body = renderText(filterForPrefs(state));
             if (body.trim()) {
+              const frozenMid = streamCardMessageId(markdownCtrl);
+              if (frozenMid) await channel.recallMessage(frozenMid).catch(() => {});
               await sendWithWithdrawnReplyFallback(
                 channel,
                 chatId,
@@ -1555,6 +1559,20 @@ function requireMessageReceipt(result: { messageId?: string }, type: string): vo
   if (!result.messageId?.trim()) {
     throw new Error(`final ${type} reply missing message receipt`);
   }
+}
+
+/**
+ * Best-effort message id of a streamed progress card, so a failed stream can be
+ * recalled instead of lingering as a frozen partial next to the fresh reply.
+ *
+ * The SDK controller keeps the id on `impl.messageId` once the card is created;
+ * the bridge only holds the controller reference (`cardCtrl` / `markdownCtrl`),
+ * so we read it loosely. Returns undefined when no card was ever opened.
+ */
+function streamCardMessageId(ctrl: unknown): string | undefined {
+  if (!ctrl || typeof ctrl !== 'object') return undefined;
+  const candidate = ctrl as { impl?: { messageId?: string }; messageId?: string };
+  return candidate.impl?.messageId ?? candidate.messageId;
 }
 
 async function sendCotDegradedNotice(input: {

@@ -67,6 +67,7 @@ interface FakeLarkChannel {
   stream(chatId: string, input: unknown, options?: unknown): Promise<void>;
   addReaction(messageId: string, emojiType: string): Promise<string>;
   removeReaction(messageId: string, reactionId: string): Promise<void>;
+  recallMessage: ReturnType<typeof vi.fn>;
 }
 
 type StreamFn = FakeLarkChannel['stream'];
@@ -491,6 +492,58 @@ describe('markdown stream startup failures', () => {
     expect(finalJson).not.toContain('progress update');
     expect(h.channel.sent[0]?.options).toMatchObject({ replyTo: 'om_card_final' });
   });
+
+  it('recalls the frozen stream card and resends the full answer as a fresh message when the trigger is withdrawn', async () => {
+    let sendAttempts = 0;
+    const h = await createHarness({
+      agentKind: 'claude',
+      messageReply: 'markdown',
+      events: [
+        { type: 'text', delta: 'FULL_ANSWER_PART_ONE ' },
+        { type: 'text', delta: 'FULL_ANSWER_PART_TWO' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      stream: async (_chatId, input) => {
+        const producer = (input as {
+          markdown?: (ctrl: unknown) => Promise<void>;
+        }).markdown;
+        const ctrl = { setContent: vi.fn(async () => {}), impl: { messageId: 'om_stream_card' } };
+        // Set the controller synchronously (mirrors the real SDK rejecting in
+        // `ensureStarted`, before the run's render loop finishes) so the
+        // withdrawn stream surfaces as `first.kind === 'stream'` and the
+        // fallback runs — while `markdownCtrl` already holds the card id.
+        void producer?.(ctrl);
+        throw new Error('The message was withdrawn.');
+      },
+      send: async () => {
+        sendAttempts += 1;
+        if (sendAttempts === 1) {
+          throw Object.assign(new Error('Request failed with status code 400'), {
+            response: { data: { message: 'The message was withdrawn.' } },
+          });
+        }
+        return { messageId: 'om_fresh' };
+      },
+    });
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_withdrawn', 'run'));
+    await waitFor(
+      () => h.channel.sent.length >= 1 && h.channel.recallMessage.mock.calls.length >= 1,
+    );
+
+    // The frozen partial card is recalled so the user never sees a duplicate.
+    expect(h.channel.recallMessage).toHaveBeenCalledWith('om_stream_card');
+    // The full answer is delivered exactly once, as a fresh message (no replyTo).
+    const final = h.channel.sent.at(-1);
+    expect(final).toBeDefined();
+    const finalJson = JSON.stringify(final?.content);
+    expect(finalJson).toContain('FULL_ANSWER_PART_ONE');
+    expect(finalJson).toContain('FULL_ANSWER_PART_TWO');
+    expect(final?.options).not.toMatchObject({ replyTo: 'om_withdrawn' });
+    expect(warn.mock.calls.some((c) => c[1] === 'reply-target-withdrawn-fallback')).toBe(true);
+  });
 });
 
 async function createHarness(options: {
@@ -653,6 +706,7 @@ function createFakeLarkChannel(harnessOptions: {
         path: { message_id: messageId, reaction_id: reactionId },
       });
     },
+    recallMessage: vi.fn(async () => ({})),
   };
   return channel;
 }
