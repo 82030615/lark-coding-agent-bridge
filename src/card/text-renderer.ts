@@ -1,6 +1,7 @@
 import { maskEmails } from './mask-email';
 import type { Block, RunState, ToolEntry } from './run-state';
 import { toolHeaderText } from './tool-render';
+import { terminalStatusLine } from './status-text';
 
 /**
  * Render `RunState` as plain markdown text — used in `messageReply: 'text'`
@@ -20,15 +21,14 @@ export function renderText(state: RunState): string {
     if (piece) parts.push(piece);
   }
 
-  if (state.terminal === 'interrupted') {
-    parts.push('_⏹ 已被中断_');
-  } else if (state.terminal === 'idle_timeout') {
-    const mins = state.idleTimeoutMinutes ?? 0;
-    parts.push(`_⏱ ${mins} 分钟无响应,已自动终止_`);
-  } else if (state.terminal === 'error' && state.errorMsg) {
-    parts.push(`⚠️ agent 失败:${state.errorMsg}`);
-  } else if (state.terminal === 'running' && state.footer) {
+  if (state.terminal === 'running' && state.footer) {
     parts.push(footerLine(state.footer));
+  } else if (state.terminal !== 'running') {
+    // Unified terminal marker — mirrors the card mode. A done with no
+    // deliverable content yields '' so sendFinalReply still skips empty
+    // final-only replies (no ghost "✅ 已完成" message).
+    const line = terminalStatusLine(state);
+    if (line) parts.push(line);
   }
 
   // Strip raw emails so the Feishu tenant audit doesn't reject the message

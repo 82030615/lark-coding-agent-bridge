@@ -1,6 +1,7 @@
 import { deepMaskEmails } from './mask-email';
 import type { Block, FooterStatus, RunState, ToolEntry } from './run-state';
 import { toolBodyMd, toolHeaderText } from './tool-render';
+import { terminalStatusLine } from './status-text';
 
 const REASONING_MAX = 1500;
 const COLLAPSE_TOOL_THRESHOLD = 3;
@@ -36,15 +37,14 @@ export function renderCard(state: RunState, options: RunCardRenderOptions = {}):
     }
   }
 
-  if (state.terminal === 'interrupted') {
-    elements.push(noteMd('_⏹ 已被中断_'));
-  } else if (state.terminal === 'idle_timeout') {
-    const mins = state.idleTimeoutMinutes ?? 0;
-    elements.push(noteMd(`_⏱ ${mins} 分钟无响应,已自动终止_`));
-  } else if (state.terminal === 'error' && state.errorMsg) {
-    elements.push(noteMd(`⚠️ agent 失败：${state.errorMsg}`));
-  } else if (state.terminal === 'done' && elements.length === 0) {
-    elements.push(noteMd('_（未返回内容）_'));
+  // Turn-end marker: a clear completion/error status so a finished run is
+  // unambiguous (vs. a card that silently froze mid-tool). Mirrors the running
+  // footer (🧠/🧰/✍️) but for the terminal state. The running footer below is
+  // only appended while still streaming.
+  if (state.terminal !== 'running') {
+    const line = terminalStatusLine(state);
+    if (line) elements.push(noteMd(line));
+    else if (state.terminal === 'done') elements.push(noteMd('_（未返回内容）_'));
   }
 
   if (state.terminal === 'running') {

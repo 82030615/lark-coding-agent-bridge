@@ -139,6 +139,11 @@ exports[`run card renderer snapshots > collapses consecutive tools while preserv
         "tag": "collapsible_panel",
         "vertical_spacing": "8px",
       },
+      {
+        "content": "_✅ 已完成_",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
@@ -258,6 +263,11 @@ exports[`run card renderer snapshots > renders active and completed thinking 2`]
         "content": "final answer",
         "tag": "markdown",
       },
+      {
+        "content": "_✅ 已完成_",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
@@ -321,7 +331,7 @@ exports[`run card renderer snapshots > renders done, error, interrupted, and idl
         "tag": "markdown",
       },
       {
-        "content": "_⏹ 已被中断_",
+        "content": "_⏹ 已中断_",
         "tag": "markdown",
         "text_size": "notation",
       },
@@ -346,7 +356,7 @@ exports[`run card renderer snapshots > renders done, error, interrupted, and idl
         "tag": "markdown",
       },
       {
-        "content": "_⏱ 15 分钟无响应,已自动终止_",
+        "content": "_⏱ 已超时（15 分钟无响应），已自动终止_",
         "tag": "markdown",
         "text_size": "notation",
       },
@@ -416,7 +426,7 @@ exports[`run card renderer snapshots > renders markdown text mode without card-o
 
 Done
 
-_⏹ 已被中断_"
+_⏹ 已中断_"
 `;
 
 exports[`run card renderer snapshots > renders markdown text mode without card-only controls 3`] = `
@@ -426,10 +436,10 @@ exports[`run card renderer snapshots > renders markdown text mode without card-o
 
 Done
 
-_⏱ 10 分钟无响应,已自动终止_"
+_⏱ 已超时（10 分钟无响应），已自动终止_"
 `;
 
-exports[`run card renderer snapshots > renders markdown text mode without card-only controls 4`] = `"⚠️ agent 失败:process failed"`;
+exports[`run card renderer snapshots > renders markdown text mode without card-only controls 4`] = `"⚠️ agent 失败：process failed"`;
 
 exports[`run card renderer snapshots > renders tool running, done, and error states 1`] = `
 {
@@ -547,6 +557,11 @@ pwd
         "tag": "collapsible_panel",
         "vertical_spacing": "8px",
       },
+      {
+        "content": "_✅ 已完成_",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
@@ -598,6 +613,11 @@ ENOENT
         "padding": "8px 8px 8px 8px",
         "tag": "collapsible_panel",
         "vertical_spacing": "8px",
+      },
+      {
+        "content": "_✅ 已完成_",
+        "tag": "markdown",
+        "text_size": "notation",
       },
     ],
   },

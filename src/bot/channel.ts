@@ -28,6 +28,7 @@ import {
   type RunState,
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
+import { describeError, retryUpdate } from './update-retry';
 import { tryHandleCommand, type Controls } from '../commands';
 import type { AppConfig } from '../config/schema';
 import {
@@ -1169,7 +1170,23 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           latestState = state;
           if (shouldOpenProgressStream(filterForPrefs(state))) progress.ensureOpen();
           if (cardCtrl) {
-            await cardCtrl.update(renderCard(filterForPrefs(state), cardRenderOptions));
+            const render = () => cardCtrl!.update(renderCard(filterForPrefs(state), cardRenderOptions));
+            if (state.terminal === 'running') {
+              await render();
+            } else {
+              // 终态更新：偶发 504/网络抖动会静默失败，导致结论（emoji 终态标识/
+              // 最终文本）丢失。退避重试，仍失败则打 warn 便于排查（方案 1+3）。
+              await retryUpdate('card', scope, render, {
+                onRetry: ({ attempt, err }) =>
+                  log.warn('card', 'update-retry', { scope, attempt, err: describeError(err) }),
+                onExhausted: (err) =>
+                  log.warn('card', 'update-failed', {
+                    scope,
+                    terminal: state.terminal,
+                    err: describeError(err),
+                  }),
+              });
+            }
           }
         },
       );
@@ -1238,7 +1255,22 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           latestState = state;
           if (shouldOpenProgressStream(filterForPrefs(state))) progress.ensureOpen();
           if (markdownCtrl) {
-            await markdownCtrl.setContent(renderText(filterForPrefs(state)));
+            const render = () => markdownCtrl!.setContent(renderText(filterForPrefs(state)));
+            if (state.terminal === 'running') {
+              await render();
+            } else {
+              // 终态更新：同 card 模式，退避重试 + 失败 warn（方案 1+3）。
+              await retryUpdate('markdown', scope, render, {
+                onRetry: ({ attempt, err }) =>
+                  log.warn('markdown', 'update-retry', { scope, attempt, err: describeError(err) }),
+                onExhausted: (err) =>
+                  log.warn('markdown', 'update-failed', {
+                    scope,
+                    terminal: state.terminal,
+                    err: describeError(err),
+                  }),
+              });
+            }
           }
         },
       );
@@ -1738,7 +1770,17 @@ async function processAgentStream(
       state = finalizeIfRunning(state);
     }
   }
-  log.info('card', 'final', { scope, terminal: state.terminal, interrupted: handle.interrupted });
+  // Tools that never received a matching tool_result stay 'lost' here (settled
+  // by markIdleTimeout/markInterrupted/finalizeIfRunning above). A non-empty
+  // list is the smoking gun for a card frozen on "🧰 正在调用工具" — the
+  // in-flight tool never resolved, so the idle watchdog was paused forever.
+  const lostTools = state.blocks
+    .filter((b): b is Extract<typeof b, { kind: 'tool' }> => b.kind === 'tool' && b.tool.status === 'lost')
+    .map((b) => b.tool.name);
+  if (lostTools.length > 0) {
+    log.warn('card', 'tools-lost', { scope, terminal: state.terminal, lostTools });
+  }
+  log.info('card', 'final', { scope, terminal: state.terminal, interrupted: handle.interrupted, lostTools });
   reportMetric('run_e2e_ms', Date.now() - runStart, { terminal: state.terminal });
   await flush(state);
   if (handle.interrupted) {
