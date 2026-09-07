@@ -208,7 +208,19 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
   // Single web console (host sidecar), backed by the supervisor.
   let uiServer: UiServerHandle | undefined;
   try {
-    uiServer = await startUiServer({ supervisor, version: pkg.version, rootDir: appPaths.rootDir });
+    // Fixed console port/host via env so firewall rules and bookmarks stay
+    // stable across restarts. Both already supported by UiServerDeps; the
+    // caller just never passed them (port defaulted to 0 = ephemeral).
+    const webUiPortRaw = process.env.LARK_CHANNEL_WEB_UI_PORT;
+    const webUiPort = webUiPortRaw ? Number.parseInt(webUiPortRaw, 10) : NaN;
+    const webUiHost = process.env.LARK_CHANNEL_WEB_UI_HOST;
+    uiServer = await startUiServer({
+      supervisor,
+      version: pkg.version,
+      rootDir: appPaths.rootDir,
+      ...(Number.isInteger(webUiPort) && webUiPort > 0 && webUiPort < 65536 ? { port: webUiPort } : {}),
+      ...(webUiHost ? { host: webUiHost } : {}),
+    });
     await writeUiSidecar(appPaths.hostUiFile, uiServer, new Date().toISOString());
     console.log(`✓ 控制台：${uiServer.url}`);
   } catch (err) {
