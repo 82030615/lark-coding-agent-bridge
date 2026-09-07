@@ -10,6 +10,13 @@ export interface FakeChannelStream {
   options: unknown;
   cardUpdates: unknown[];
   markdownContents: string[];
+  /**
+   * Parallel to `cardUpdates`: whether the update happened AFTER the stream
+   * producer resolved (i.e. the run had settled). Used to distinguish an
+   * in-stream terminal flush from a post-settle "re-assert" re-push.
+   */
+  cardUpdatesAfterSettle: boolean[];
+  markdownContentsAfterSettle: boolean[];
 }
 
 export interface FakeRawClientRequest {
@@ -147,23 +154,35 @@ export function createFakeChannel(): FakeChannel {
         options,
         cardUpdates: [],
         markdownContents: [],
+        cardUpdatesAfterSettle: [],
+        markdownContentsAfterSettle: [],
       };
       streams.push(record);
+      // Flipped to true once the producer resolves, so updates made afterwards
+      // (e.g. the terminal re-assert) are flagged as post-settle.
+      let settled = false;
+      const markSettled = (): void => {
+        settled = true;
+      };
 
       if (isCardStreamInput(input)) {
         await input.card.producer({
           update: async (card: unknown): Promise<void> => {
             record.cardUpdates.push(card);
+            record.cardUpdatesAfterSettle.push(settled);
           },
         });
+        markSettled();
       }
 
       if (isMarkdownStreamInput(input)) {
         await input.markdown({
           setContent: async (markdown: string): Promise<void> => {
             record.markdownContents.push(markdown);
+            record.markdownContentsAfterSettle.push(settled);
           },
         });
+        markSettled();
       }
     },
   };

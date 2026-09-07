@@ -546,6 +546,106 @@ describe('markdown stream startup failures', () => {
   });
 });
 
+describe('terminal re-assert (stale-frame guard)', () => {
+  it('re-pushes the terminal frame after the stream settles in markdown mode', async () => {
+    const updates: { markdown: string; afterSettle: boolean }[] = [];
+    let settled = false;
+    const h = await createHarness({
+      agentKind: 'claude',
+      messageReply: 'markdown',
+      events: [
+        { type: 'text', delta: 'answer' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      stream: async (_chatId, input) => {
+        const md = (input as { markdown?: (ctrl: { setContent(m: string): Promise<void> }) => Promise<void> }).markdown;
+        if (md) {
+          await md({
+            setContent: async (markdown: string) => {
+              updates.push({ markdown, afterSettle: settled });
+            },
+          });
+        }
+        settled = true; // producer resolved → subsequent updates are post-settle
+      },
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_reassert_md', 'run'));
+    await waitFor(() => updates.some((u) => u.afterSettle), 5000);
+
+    const reasserted = updates.filter((u) => u.afterSettle);
+    expect(reasserted.length).toBeGreaterThanOrEqual(1);
+    const last = reasserted[reasserted.length - 1]?.markdown ?? '';
+    expect(last).toContain('✅ 已完成');
+    expect(last).not.toContain('🧰 正在调用工具');
+  });
+
+  it('re-pushes the terminal frame after the stream settles in card mode', async () => {
+    const cards: { card: unknown; afterSettle: boolean }[] = [];
+    let settled = false;
+    const h = await createHarness({
+      agentKind: 'claude',
+      messageReply: 'card',
+      events: [
+        { type: 'text', delta: 'answer' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      stream: async (_chatId, input) => {
+        const producer = (input as { card?: { producer?: (ctrl: { update(next: unknown): Promise<void> }) => Promise<void> } }).card?.producer;
+        if (producer) {
+          await producer({
+            update: async (next: unknown) => {
+              cards.push({ card: next, afterSettle: settled });
+            },
+          });
+        }
+        settled = true;
+      },
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_reassert_card', 'run'));
+    await waitFor(() => cards.some((c) => c.afterSettle), 5000);
+
+    const reasserted = cards.filter((c) => c.afterSettle);
+    expect(reasserted.length).toBeGreaterThanOrEqual(1);
+    const last = JSON.stringify(reasserted[reasserted.length - 1]?.card ?? '');
+    // 卡片终态标记为「已完成」（无 ✅ 前缀，渲染差异于 markdown 模式）。
+    expect(last).toContain('已完成');
+    expect(last).not.toContain('🧰 正在调用工具');
+  });
+
+  it('warns when a tool runs longer than the long-tool threshold (root-cause probe)', async () => {
+    // 阈值设为负值：真实耗时（>=0）必然超过，无需伪造时钟，也不破坏 waitFor 的真实时钟轮询。
+    process.env.LARK_BRIDGE_LONG_TOOL_WARN_MS = '-1';
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const h = await createHarness({
+      agentKind: 'claude',
+      messageReply: 'markdown',
+      events: [
+        { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'sleep 99' } },
+        { type: 'tool_result', id: 't1', output: 'ok', isError: false },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      stream: async (_chatId, input) => {
+        const md = (input as { markdown?: (ctrl: { setContent(m: string): Promise<void> }) => Promise<void> }).markdown;
+        await md?.({ setContent: async () => {} });
+      },
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_long_tool', 'run'));
+    await waitFor(
+      () => warn.mock.calls.some((c) => c[1] === 'tool-long-running'),
+      5000,
+    );
+
+    expect(warn.mock.calls.some((c) => c[1] === 'tool-long-running')).toBe(true);
+    delete process.env.LARK_BRIDGE_LONG_TOOL_WARN_MS;
+  });
+});
+
 async function createHarness(options: {
   reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
   stream?: StreamFn;

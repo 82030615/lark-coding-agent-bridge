@@ -79,6 +79,11 @@ import {
 const DEBOUNCE_MS = 600;
 const STREAM_TERMINAL_GRACE_MS = 3000;
 const REACTION_CLEANUP_GRACE_MS = 1000;
+// 工具调用长耗时 warn 的默认阈值（ms）。实际阈值在 processAgentStream 内按
+// LARK_BRIDGE_LONG_TOOL_WARN_MS 读取（调用期读取，便于测试覆盖）：工具超过该
+// 时长仍未返回 tool_result 即打 warn（root-cause 探针），这类长时间挂起是
+// 「卡片停在🧰 正在调用工具」最常见的成因。
+const DEFAULT_LONG_TOOL_WARN_MS = 120_000;
 
 const BRIDGE_AGENT_INSTRUCTIONS = [
   '你在 bridge 进程中运行，普通 lark-cli 会继承 LARK_CHANNEL=1 并进入 bridge-bound 模式。',
@@ -1214,6 +1219,22 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         if (controls.profileConfig.agentKind !== 'codex') throw err;
         log.fail('stream', err, { mode: replyMode, step: 'progress-stream' });
       }
+      // L1：流式已 settle，记录终态消息 key（messageId + 长度），便于下次出问题时
+      // 对照「实际发了什么 / 飞书客户端重绘了什么」。
+      const settledMid = streamCardMessageId(cardCtrl);
+      log.info('card', 'stream-settled', {
+        scope,
+        terminal: latestState.terminal,
+        messageId: settledMid,
+        chars: renderText(filterForPrefs(latestState)).length,
+      });
+      // 终态重断言：stream 已 settle 后，对已持有的控制器对终态全量重发一次，
+      // 压过「已接收未重绘」的陈旧 running 帧（stale-frame guard）。
+      if (latestState.terminal !== 'running' && cardCtrl) {
+        await reassertTerminal('card', scope, latestState.terminal, () =>
+          cardCtrl!.update(renderCard(filterForPrefs(latestState), cardRenderOptions)),
+        );
+      }
       await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
       if (controls.profileConfig.agentKind === 'codex') {
         await sendFinalReply({
@@ -1299,6 +1320,20 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       } catch (err) {
         if (controls.profileConfig.agentKind !== 'codex') throw err;
         log.fail('stream', err, { mode: replyMode, step: 'progress-stream' });
+      }
+      // L1：流式已 settle（markdown 模式同样记录终态消息 key）。
+      const settledMid = streamCardMessageId(markdownCtrl);
+      log.info('markdown', 'stream-settled', {
+        scope,
+        terminal: latestState.terminal,
+        messageId: settledMid,
+        chars: renderText(filterForPrefs(latestState)).length,
+      });
+      // 终态重断言：markdown 模式用 setContent 全量重发，压过陈旧 running 帧。
+      if (latestState.terminal !== 'running' && markdownCtrl) {
+        await reassertTerminal('markdown', scope, latestState.terminal, () =>
+          markdownCtrl!.setContent(renderText(filterForPrefs(latestState))),
+        );
       }
       await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
       if (controls.profileConfig.agentKind === 'codex') {
@@ -1607,6 +1642,35 @@ function streamCardMessageId(ctrl: unknown): string | undefined {
   return candidate.impl?.messageId ?? candidate.messageId;
 }
 
+/**
+ * 终态重断言（stale-frame guard）。
+ *
+ * 背景：已观测到 run 已 `terminal:done`、却仍「卡片/消息停在🧰 正在调用工具」
+ * 的情况——终态 update 返回 HTTP 200 但飞书客户端未重绘（「已接收未重绘」）。
+ * `retryUpdate` 只覆盖 HTTP 错误，覆盖不到这种成功路径静默丢帧。
+ *
+ * 做法：在 `awaitRenderAwareStream` settle 之后，再用已持有的控制器对当前终态
+ * 全量重发一次。该更新发生在 in-`processAgentStream` flush 竞争点（其最后一次
+ * flush 在 line ~1793）之后，故能压过停留在 running footer 的陈旧帧。失败仅 warn，
+ * 不影响后续回退/收尾逻辑。
+ */
+async function reassertTerminal(
+  label: 'card' | 'markdown',
+  scope: string,
+  terminal: RunState['terminal'],
+  update: () => Promise<void>,
+): Promise<void> {
+  try {
+    await retryUpdate(label, scope, update, {
+      onRetry: ({ attempt, err }) =>
+        log.warn(label, 'reassert-retry', { scope, attempt, err: describeError(err) }),
+    });
+    log.info(label, 'reassert', { scope, terminal });
+  } catch (err) {
+    log.warn(label, 'reassert-failed', { scope, terminal, err: describeError(err) });
+  }
+}
+
 async function sendCotDegradedNotice(input: {
   channel: LarkChannel;
   chatId: string;
@@ -1668,6 +1732,8 @@ async function processAgentStream(
   flush: (state: RunState) => Promise<void>,
 ): Promise<RunState> {
   const runStart = Date.now();
+  // 长耗时工具探针阈值：调用期读取环境变量，便于测试调低阈值覆盖。
+  const longToolWarnMs = Number(process.env.LARK_BRIDGE_LONG_TOOL_WARN_MS ?? DEFAULT_LONG_TOOL_WARN_MS);
   let state: RunState = initialState;
 
   // Idle watchdog: claude going silent for `idleTimeoutMs` is treated as
@@ -1687,6 +1753,9 @@ async function processAgentStream(
   let idleFired = false;
   let timer: NodeJS.Timeout | undefined;
   const inFlightTools = new Set<string>();
+  // 记录每个工具调用的开始时刻，用于 L2 长耗时探针（root-cause：卡片停在
+  // 「正在调用工具」最常见的成因是工具长时间未返回 tool_result）。
+  const toolStartMs = new Map<string, number>();
   const armOrPauseIdle = (): void => {
     if (!idleTimeoutMs) return;
     if (timer) clearTimeout(timer);
@@ -1712,12 +1781,22 @@ async function processAgentStream(
       // closes it. Other event types are bookkept after the if/else.
       if (evt.type === 'tool_use') {
         inFlightTools.add(evt.id);
+        toolStartMs.set(evt.id, Date.now());
         log.info('agent', 'tool-in-flight', {
           tool: evt.name,
           inFlight: inFlightTools.size,
         });
       } else if (evt.type === 'tool_result') {
         inFlightTools.delete(evt.id);
+        const started = toolStartMs.get(evt.id);
+        toolStartMs.delete(evt.id);
+        if (started !== undefined) {
+          const ms = Date.now() - started;
+          // L2：长耗时工具探针。只在超过阈值的 tool_result 上 warn，避免刷屏。
+          if (ms > longToolWarnMs) {
+            log.warn('agent', 'tool-long-running', { scope, ms });
+          }
+        }
         log.info('agent', 'tool-done', { inFlight: inFlightTools.size });
       }
       armOrPauseIdle();
