@@ -41,6 +41,12 @@ const STDOUT_INFO_ALLOWLIST = new Set<string>([
   'outbound.sent',
   'outbound.markdown-stream-fallback',
   'card.final',
+  // Terminal re-assert diagnostics — surfaced so `tail -f` can prove the
+  // stale-frame guard fired (or didn't) without grepping the JSONL.
+  'card.stream-settled',
+  'markdown.stream-settled',
+  'card.reassert',
+  'markdown.reassert',
 ]);
 
 /**
@@ -378,6 +384,18 @@ function formatStdout(
     const mark = t === 'done' ? '✓' : t === 'interrupted' ? '⏹' : '✗';
     const scope = fields.scope ? shortId(fields.scope) : c;
     return `  ${mark} ${scope} ${t}`;
+  }
+  if (event === 'stream-settled' && (phase === 'card' || phase === 'markdown')) {
+    const scope = fields.scope ? shortId(fields.scope) : (ctx.msgId ? shortId(ctx.msgId) : '-');
+    const t = fields.terminal;
+    const mark = t === 'done' ? '✓' : t === 'interrupted' ? '⏹' : '✗';
+    const chars = typeof fields.chars === 'number' ? fields.chars : '-';
+    const msg = fields.messageId ? shortId(fields.messageId) : '-';
+    return `  ≈ ${phase} settled scope=${scope} terminal=${t}${mark !== '✗' ? '' : ` ${mark}`} chars=${chars} msg=${msg}`;
+  }
+  if (event === 'reassert' && (phase === 'card' || phase === 'markdown')) {
+    const scope = fields.scope ? shortId(fields.scope) : '-';
+    return `  ⟳ reassert ${phase} scope=${scope} terminal=${fields.terminal ?? '-'}`;
   }
 
   // Generic compact form for warns / errors / unmatched info.
