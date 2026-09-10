@@ -50,6 +50,7 @@ describe('CodeBuddy capability contract', () => {
       { value: 'hy3-x', label: 'Hy3-x-0.05' },
       { value: 'glm-5.3-flash', label: 'GLM-5.3-Flash-0.06' },
       { value: 'deepseek-v4-flash', label: 'Deepseek-V4-Flash-0.17' },
+      { value: 'deepseek-v4.1-flash', label: 'Deepseek-V4.1-Flash-0.03' },
     ]);
     expect(models.some((m) => m.value === 'glm-5.3')).toBe(false);
     // Claude/Codex lists must be untouched.

@@ -55,6 +55,7 @@ describe('agent model catalog', () => {
       { value: 'hy3-x', label: 'Hy3-x-0.05' },
       { value: 'glm-5.3-flash', label: 'GLM-5.3-Flash-0.06' },
       { value: 'deepseek-v4-flash', label: 'Deepseek-V4-Flash-0.17' },
+      { value: 'deepseek-v4.1-flash', label: 'Deepseek-V4.1-Flash-0.03' },
     ]);
     // Unset / default sentinel / unknown model all resolve to the CodeBuddy default (hy4-preview).
     expect(normalizeModelSelection('codebuddy', undefined)).toBe('hy4-preview');
@@ -69,5 +70,6 @@ describe('agent model catalog', () => {
     expect(resolveModelArg('codebuddy', 'hy3-x')).toBe('hy3-x');
     expect(resolveModelArg('codebuddy', 'glm-5.3-flash')).toBe('glm-5.3-flash');
     expect(resolveModelArg('codebuddy', 'deepseek-v4-flash')).toBe('deepseek-v4-flash');
+    expect(resolveModelArg('codebuddy', 'deepseek-v4.1-flash')).toBe('deepseek-v4.1-flash');
   });
 });
