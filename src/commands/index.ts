@@ -41,7 +41,10 @@ import type {
   ProfileConfig,
   ProfileMode,
 } from '../config/profile-schema';
-import { effectiveLarkCliIdentity } from '../config/profile-schema';
+import {
+  effectiveLarkCliIdentity,
+  isCdAliasName,
+} from '../config/profile-schema';
 import { resolveAppPaths } from '../config/app-paths';
 import { accessToClaudePermissionMode } from '../config/permissions';
 import {
@@ -170,6 +173,7 @@ const handlers: Record<string, Handler> = {
   '/new': handleNew,
   '/reset': handleNew,
   '/cd': handleCd,
+  '/cdset': handleCdSet,
   '/ws': handleWs,
   '/resume': handleResume,
   '/status': handleStatus,
@@ -201,6 +205,7 @@ const ADMIN_COMMANDS = new Set([
   '/reconnect',
   '/doctor',
   '/cd',
+  '/cdset',
   '/ws',
   '/invite',
   '/remove',
@@ -381,26 +386,220 @@ async function handleNewChat(rawName: string, ctx: CommandContext): Promise<void
   );
 }
 
+const CD_USAGE = '用法：`/cd <绝对路径>`、`/cd ~/xxx` 或 `/cd <别名>`（别名见 `/cdset list`）';
+const CD_ABSOLUTE_HINT = '请使用绝对路径，或 `~/xxx` 表示 home 下的子路径。';
+
 async function handleCd(args: string, ctx: CommandContext): Promise<void> {
   const input = args.trim();
   if (!input) {
-    await reply(ctx, '用法：`/cd <绝对路径>` 或 `/cd ~/xxx`');
+    await reply(ctx, CD_USAGE);
     return;
   }
-  if (!isAbsoluteOrTilde(input)) {
-    await reply(ctx, '请使用绝对路径，或 `~/xxx` 表示 home 下的子路径。');
+
+  // Path form keeps the pre-alias behavior byte-for-byte and never consults
+  // the alias table. It also couldn't match: alias names are bare tokens
+  // (isCdAliasName rejects anything containing `/` or `~`).
+  if (isAbsoluteOrTilde(input)) {
+    const workspace = await resolveWorkingDirectory(expandTilde(input));
+    if (!workspace.ok) {
+      await reply(ctx, workspace.userVisible);
+      return;
+    }
+    await applyCd(ctx, workspace.cwdRealpath);
     return;
   }
-  const absolute = expandTilde(input);
-  const workspace = await resolveWorkingDirectory(absolute);
+
+  // Not a path — fall back to the shared `/cdset` table, whole-string match
+  // only. `aiops/src` isn't a valid name, so it reports the original error
+  // instead of being concatenated onto an alias.
+  if (!isCdAliasName(input)) {
+    await reply(ctx, CD_ABSOLUTE_HINT);
+    return;
+  }
+
+  const aliases = await loadCdAliasesSafely(ctx);
+  const target = aliases[input];
+  if (target === undefined) {
+    await reply(
+      ctx,
+      `未找到目录别名：\`${input}\`。${CD_ABSOLUTE_HINT}\n` +
+        `用 \`/cdset list\` 查看已有别名，或 \`/cdset ${input} <路径>\` 新建。`,
+    );
+    return;
+  }
+
+  // An alias is just a stored path: it re-enters the same safety gate, so it
+  // grants no extra reach and a now-unusable target is reported clearly.
+  const workspace = await resolveWorkingDirectory(expandTilde(target));
+  if (!workspace.ok) {
+    await reply(
+      ctx,
+      `❌ 别名 \`${input}\` 指向的目录不可用：${workspace.userVisible}\n` +
+        `用 \`/cdset ${input} <新路径>\` 重设，或 \`/cdset remove ${input}\` 删除。`,
+    );
+    return;
+  }
+  await applyCd(ctx, workspace.cwdRealpath, input);
+}
+
+/** Interrupt the run, repoint cwd, reset session — shared by `/cd` branches. */
+async function applyCd(
+  ctx: CommandContext,
+  cwdRealpath: string,
+  alias?: string,
+): Promise<void> {
+  ctx.activeRuns.interrupt(ctx.scope);
+  ctx.workspaces.setCwd(ctx.scope, cwdRealpath);
+  ctx.sessions.clear(ctx.scope);
+  const via = alias ? `（别名 \`${alias}\`）` : '';
+  await reply(ctx, `✓ 已切换 cwd 到 \`${cwdRealpath}\`${via}\n（session 已重置）`);
+}
+
+/** Alias lookups must never break `/cd`: a broken config just means no aliases. */
+async function loadCdAliasesSafely(ctx: CommandContext): Promise<Record<string, string>> {
+  try {
+    return await configOps.loadCdAliases(ctx.controls);
+  } catch (err) {
+    log.warn('command', 'cd-alias-load-failed', { err: String(err) });
+    return {};
+  }
+}
+
+/** Sub-command verbs `/cdset` reserves, so they can never be alias names. */
+const CD_ALIAS_RESERVED = new Set(['list', 'ls', 'remove', 'rm', 'help']);
+const CDSET_USAGE = [
+  '用法：',
+  '• `/cdset <别名> <绝对路径|~/子路径>` — 设置或更新别名',
+  '• `/cdset list` — 列出所有别名',
+  '• `/cdset remove <别名>` — 删除别名',
+  '',
+  '例：`/cdset aiops ~/workspace/cbs-spec/aiops`，之后 `/cd aiops` 就能切过去。',
+].join('\n');
+
+async function handleCdSet(args: string, ctx: CommandContext): Promise<void> {
+  const trimmed = args.trim();
+  const first = trimmed.split(/\s+/)[0] ?? '';
+  // Slice the raw remainder (not a re-joined token list) so a path containing
+  // spaces survives verbatim.
+  const rest = trimmed.slice(first.length).trim();
+  switch (first) {
+    case '':
+    case 'list':
+    case 'ls':
+      return handleCdSetList(ctx);
+    case 'remove':
+    case 'rm':
+      return handleCdSetRemove(rest, ctx);
+    case 'help':
+      await reply(ctx, CDSET_USAGE);
+      return;
+    default:
+      return handleCdSetSave(first, rest, ctx);
+  }
+}
+
+async function handleCdSetList(ctx: CommandContext): Promise<void> {
+  const aliases = await loadCdAliasesSafely(ctx);
+  const names = Object.keys(aliases).sort((a, b) => a.localeCompare(b));
+  if (names.length === 0) {
+    await reply(
+      ctx,
+      '还没有目录别名。\n\n用 `/cdset <别名> <绝对路径>` 添加，例如 `/cdset aiops ~/workspace/cbs-spec/aiops`。',
+    );
+    return;
+  }
+  const rows = ['| 别名 | 目录 |', '|---|---|'];
+  for (const name of names) rows.push(`| \`${name}\` | ${aliases[name]} |`);
+  await reply(
+    ctx,
+    [
+      `📂 **目录别名**（共 ${names.length} 个，所有 profile 共享）`,
+      '',
+      rows.join('\n'),
+      '',
+      '`/cd <别名>` 切换 · `/cdset <别名> <路径>` 设置 · `/cdset remove <别名>` 删除',
+    ].join('\n'),
+  );
+}
+
+async function handleCdSetSave(
+  name: string,
+  rawPath: string,
+  ctx: CommandContext,
+): Promise<void> {
+  if (!isCdAliasName(name)) {
+    await reply(
+      ctx,
+      `❌ 别名 \`${name}\` 不合法：只能用字母、数字、\`.\`、\`_\`、\`-\`，需以字母或数字开头，最长 64 字符。`,
+    );
+    return;
+  }
+  if (CD_ALIAS_RESERVED.has(name)) {
+    await reply(ctx, `❌ \`${name}\` 是 \`/cdset\` 的子命令名，不能当别名，换一个名字。`);
+    return;
+  }
+  if (!rawPath) {
+    await reply(ctx, CDSET_USAGE);
+    return;
+  }
+  if (!isAbsoluteOrTilde(rawPath)) {
+    await reply(
+      ctx,
+      `别名要指向绝对路径，或 \`~/xxx\` 表示 home 下的子路径。\n例：\`/cdset ${name} ~/workspace/cbs-spec/aiops\``,
+    );
+    return;
+  }
+  // Validate through the same gate `/cd` uses and store the realpath, so
+  // `/cd <alias>` never depends on how the path was typed.
+  const workspace = await resolveWorkingDirectory(expandTilde(rawPath));
   if (!workspace.ok) {
     await reply(ctx, workspace.userVisible);
     return;
   }
-  ctx.activeRuns.interrupt(ctx.scope);
-  ctx.workspaces.setCwd(ctx.scope, workspace.cwdRealpath);
-  ctx.sessions.clear(ctx.scope);
-  await reply(ctx, `✓ 已切换 cwd 到 \`${workspace.cwdRealpath}\`\n（session 已重置）`);
+
+  let previous: string | undefined;
+  try {
+    await configOps.saveCdAliases(ctx.controls, (current) => {
+      previous = current[name];
+      return { ...current, [name]: workspace.cwdRealpath };
+    });
+  } catch (err) {
+    log.fail('command', err, { step: 'cdset.save' });
+    reportMetric('command_fail', 1, { step: 'cdset.save' });
+    await reply(ctx, `❌ 保存目录别名失败：${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  log.info('command', 'cdset-save', { name, updated: previous !== undefined });
+  await reply(
+    ctx,
+    previous !== undefined && previous !== workspace.cwdRealpath
+      ? `✓ 已更新目录别名：\`${name}\` → ${workspace.cwdRealpath}\n（原：${previous}）\n用 \`/cd ${name}\` 切换。`
+      : `✓ 已设置目录别名：\`${name}\` → ${workspace.cwdRealpath}\n用 \`/cd ${name}\` 切换。`,
+  );
+}
+
+async function handleCdSetRemove(name: string, ctx: CommandContext): Promise<void> {
+  if (!name) {
+    await reply(ctx, '用法：`/cdset remove <别名>`');
+    return;
+  }
+  let missing = false;
+  try {
+    await configOps.saveCdAliases(ctx.controls, (current) => {
+      missing = current[name] === undefined;
+      if (missing) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
+  } catch (err) {
+    log.fail('command', err, { step: 'cdset.remove' });
+    reportMetric('command_fail', 1, { step: 'cdset.remove' });
+    await reply(ctx, `❌ 删除目录别名失败：${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  log.info('command', 'cdset-remove', { name, missing });
+  await reply(ctx, missing ? `未找到目录别名：\`${name}\`` : `✓ 已删除目录别名：\`${name}\``);
 }
 
 async function handleWs(args: string, ctx: CommandContext): Promise<void> {

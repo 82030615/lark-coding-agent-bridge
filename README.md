@@ -138,7 +138,10 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | Command | Effect |
 |---|---|
 | `/new`, `/reset` | Clear the current session |
-| `/cd <path>` | Switch working directory and reset the session |
+| `/cd <path\|alias>` | Switch working directory (absolute path, `~/sub`, or a `/cdset` shortcut) and reset the session |
+| `/cdset <alias> <path>` | Save a `/cd` shortcut in the root config, shared by every profile |
+| `/cdset list` | List `/cd` shortcuts |
+| `/cdset remove <alias>` | Delete a `/cd` shortcut |
 | `/ws list` | List named workspaces |
 | `/ws save <name>` | Save the current working directory as a named workspace |
 | `/ws use <name>` | Switch to a named workspace |

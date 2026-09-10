@@ -138,7 +138,10 @@ lark-channel-bridge profile export <name> --include-secrets --yes
 | 命令 | 作用 |
 |---|---|
 | `/new`, `/reset` | 清空当前会话 |
-| `/cd <path>` | 切换工作目录并重置会话 |
+| `/cd <path\|别名>` | 切换工作目录（绝对路径、`~/子路径` 或 `/cdset` 快捷别名）并重置会话 |
+| `/cdset <别名> <路径>` | 保存 `/cd` 快捷别名，存根配置，所有 profile 共享 |
+| `/cdset list` | 列出 `/cd` 快捷别名 |
+| `/cdset remove <别名>` | 删除 `/cd` 快捷别名 |
 | `/ws list` | 列出命名工作空间 |
 | `/ws save <name>` | 把当前工作目录保存为命名工作空间 |
 | `/ws use <name>` | 切换到命名工作空间 |

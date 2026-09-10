@@ -21,6 +21,7 @@ describe('README runtime contract', () => {
       '--include-secrets --yes',
       'lark-cli identity policy',
       'profile-local lark-cli directory',
+      '/cdset',
       'lark-cli 身份策略',
       '当前 profile 的 lark-cli 目录',
       'pnpm test',
