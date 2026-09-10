@@ -9,7 +9,12 @@ import {
 } from './profile-store';
 import { saveConfig } from './store';
 import { secretKeyForApp, type AppConfig, type AppPreferences } from './schema';
-import type { ProfileAccess, ProfileConfig, ProfileMode } from './profile-schema';
+import {
+  normalizeCdAliases,
+  type ProfileAccess,
+  type ProfileConfig,
+  type ProfileMode,
+} from './profile-schema';
 import { applyLarkCliIdentityPolicy } from '../lark-cli/identity-policy';
 import { log, reportMetric } from '../core/logger';
 
@@ -116,6 +121,47 @@ export async function saveAccessConfig(
     });
   } catch (err) {
     reportMetric('command_fail', 1, { step: 'access.save' });
+    throw err;
+  }
+}
+
+/**
+ * Read the root-level `/cd` alias table. Aliases live on the root config (not
+ * on a profile) so every profile shares them, and they are read from disk on
+ * every lookup instead of being cached in {@link MutableProfileState}: a
+ * `/cdset` from another profile or another bridge process must take effect
+ * without a restart. Legacy / missing configs simply have no aliases.
+ */
+export async function loadCdAliases(
+  state: Pick<MutableProfileState, 'configPath'>,
+): Promise<Record<string, string>> {
+  const root = await loadRootConfig(state.configPath);
+  return root?.cdAliases ?? {};
+}
+
+/**
+ * Mutate the root-level `/cd` alias table under the config file lock and
+ * persist it. Unlike {@link saveAccessConfig} there is no in-memory refresh:
+ * `cdAliases` is root-level, so neither `state.cfg` (AppConfig) nor
+ * `state.profileConfig` mirrors it.
+ */
+export async function saveCdAliases(
+  state: Pick<MutableProfileState, 'configPath'>,
+  mutate: (aliases: Record<string, string>) => Record<string, string>,
+): Promise<Record<string, string>> {
+  try {
+    return await withConfigFileLock(state.configPath, async () => {
+      const root = await loadRootConfig(state.configPath);
+      if (!root) throw new Error('root config not found');
+      const next = normalizeCdAliases(mutate({ ...(root.cdAliases ?? {}) }));
+      if (Object.keys(next).length > 0) root.cdAliases = next;
+      else delete root.cdAliases;
+      await saveRootConfig(root, state.configPath);
+      log.info('config-ops', 'cd-aliases-mutated', { count: Object.keys(next).length });
+      return next;
+    });
+  } catch (err) {
+    reportMetric('command_fail', 1, { step: 'cd-aliases.save' });
     throw err;
   }
 }

@@ -6,6 +6,8 @@ import {
 import {
   createDefaultProfileConfig,
   effectiveLarkCliIdentity,
+  isCdAliasName,
+  normalizeCdAliases,
   normalizeProfileConfig,
 } from '../../../src/config/profile-schema';
 
@@ -572,5 +574,59 @@ describe('profile schema', () => {
       defaultAccess: 'workspace',
       maxAccess: 'workspace',
     });
+  });
+});
+
+describe('/cd alias normalization', () => {
+  it('keeps only bare names pointing at absolute or ~ paths', () => {
+    expect(
+      normalizeCdAliases({
+        aiops: '/srv/aiops',
+        tilde: '~/workspace/x',
+        'has/slash': '/srv/x',
+        'has space': '/srv/x',
+        '.hidden': '/srv/x',
+        '-rf': '/srv/x',
+        empty: '   ',
+        relative: 'workspace/x',
+        tildeOnly: '~',
+        numeric: 42,
+        nested: {},
+      }),
+    ).toEqual({
+      aiops: '/srv/aiops',
+      tilde: '~/workspace/x',
+    });
+  });
+
+  it('returns {} for non-object input', () => {
+    expect(normalizeCdAliases(null)).toEqual({});
+    expect(normalizeCdAliases(undefined)).toEqual({});
+    expect(normalizeCdAliases([])).toEqual({});
+    expect(normalizeCdAliases('aiops')).toEqual({});
+    expect(normalizeCdAliases(1)).toEqual({});
+  });
+
+  it('sorts keys for stable config diffs', () => {
+    expect(Object.keys(normalizeCdAliases({ zeta: '/z', alpha: '/a', mid: '/m' }))).toEqual([
+      'alpha',
+      'mid',
+      'zeta',
+    ]);
+  });
+
+  it('accepts bare tokens and rejects path-ish names', () => {
+    expect(isCdAliasName('aiops')).toBe(true);
+    expect(isCdAliasName('ai-ops_1.2')).toBe(true);
+    expect(isCdAliasName('a')).toBe(true);
+    expect(isCdAliasName('a'.repeat(64))).toBe(true);
+
+    expect(isCdAliasName('')).toBe(false);
+    expect(isCdAliasName('a b')).toBe(false);
+    expect(isCdAliasName('a/b')).toBe(false);
+    expect(isCdAliasName('~x')).toBe(false);
+    expect(isCdAliasName('.env')).toBe(false);
+    expect(isCdAliasName('-rf')).toBe(false);
+    expect(isCdAliasName('a'.repeat(65))).toBe(false);
   });
 });

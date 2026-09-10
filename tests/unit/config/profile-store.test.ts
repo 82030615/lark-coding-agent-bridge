@@ -258,4 +258,58 @@ describe('profile store canonical serialization', () => {
 
     expect(root.migrations?.permissionDefaultsV1).toEqual(['claude']);
   });
+
+  it('persists root-level /cd aliases across save→load round-trip', async () => {
+    const root = await tmpRoot();
+    const configPath = join(root, 'config.json');
+    const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
+
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        cdAliases: { aiops: '/srv/aiops', relative: 'workspace/x' },
+        profiles: { claude: profile },
+      },
+      configPath,
+    );
+
+    const saved = JSON.parse(await readFile(configPath, 'utf8'));
+    // The relative entry is dropped by normalization on the serialize side too.
+    expect(saved.cdAliases).toEqual({ aiops: '/srv/aiops' });
+
+    const loaded = await loadRootConfig(configPath);
+    expect(loaded?.cdAliases).toEqual({ aiops: '/srv/aiops' });
+  });
+
+  it('omits cdAliases from disk when empty', async () => {
+    const root = await tmpRoot();
+    const configPath = join(root, 'config.json');
+    const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
+
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: { claude: profile },
+      },
+      configPath,
+    );
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty('cdAliases');
+
+    const emptyPath = join(root, 'empty.json');
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        cdAliases: {},
+        profiles: { claude: profile },
+      },
+      emptyPath,
+    );
+    expect(JSON.parse(await readFile(emptyPath, 'utf8'))).not.toHaveProperty('cdAliases');
+  });
 });

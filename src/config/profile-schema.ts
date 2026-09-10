@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import type {
   AppCredentials,
   AppPreferences,
@@ -199,6 +200,14 @@ export interface RootConfig {
   migrations?: {
     permissionDefaultsV1?: string[];
   };
+  /**
+   * `/cd <alias>` shortcuts, shared by every profile under this root config.
+   * Root-level on purpose: a shortcut names a local directory, not a bot
+   * identity. Keys are matched as a whole string (`/cd aiops/src` never
+   * concatenates); values are absolute or `~/`-prefixed directories. Omitted
+   * from disk when empty.
+   */
+  cdAliases?: Record<string, string>;
   profiles: Record<string, ProfileConfig>;
 }
 
@@ -373,6 +382,40 @@ function normalizeAccess(
     // Omit when empty so configs without per-chat overrides stay clean.
     ...(Object.keys(chatRequireMention).length > 0 ? { chatRequireMention } : {}),
   };
+}
+
+/**
+ * Alias names are matched as a whole string, so they must not look like a path
+ * fragment: a bare token that starts with a letter/digit (keeps `.`, `..` and
+ * `-rf` out), 1-64 chars.
+ */
+const CD_ALIAS_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+export function isCdAliasName(value: unknown): value is string {
+  return typeof value === 'string' && CD_ALIAS_NAME_RE.test(value);
+}
+
+/**
+ * Keep only `bare-name → absolute | ~/sub` entries; drop anything malformed so
+ * a hand-edited config can never smuggle a relative path into `/cd`. Keys are
+ * sorted to keep config.json diffs stable across rewrites.
+ */
+export function normalizeCdAliases(input: unknown): Record<string, string> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  const entries: Array<[string, string]> = [];
+  for (const [name, value] of Object.entries(input as Record<string, unknown>)) {
+    if (!isCdAliasName(name)) continue;
+    if (typeof value !== 'string') continue;
+    const path = value.trim();
+    if (!path) continue;
+    // `~` alone resolves to the home root, which resolveWorkingDirectory
+    // always rejects — don't keep a shortcut that can never work.
+    if (path === '~') continue;
+    if (!isAbsolute(path) && !path.startsWith('~/')) continue;
+    entries.push([name, path]);
+  }
+  entries.sort(([a], [b]) => a.localeCompare(b));
+  return Object.fromEntries(entries);
 }
 
 /** Keep only string→boolean entries; drop anything malformed. */

@@ -4,6 +4,7 @@ import * as lockfile from 'proper-lockfile';
 import { writeFileAtomic } from '../platform/atomic-write';
 import { resolveAppPaths } from './app-paths';
 import {
+  normalizeCdAliases,
   normalizeProfileConfig,
   type AgentKind,
   type ProfileConfig,
@@ -27,12 +28,14 @@ function normalizeRootConfig(root: RootConfig): RootConfig {
     profiles[name] = normalizeProfileConfig(profile);
   }
   const migrations = normalizeRootMigrations(root.migrations);
+  const cdAliases = normalizeCdAliases(root.cdAliases);
   return {
     schemaVersion: 2,
     activeProfile: root.activeProfile,
     preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
     ...(migrations ? { migrations } : {}),
+    ...(Object.keys(cdAliases).length > 0 ? { cdAliases } : {}),
     profiles,
   };
 }
@@ -74,12 +77,14 @@ function serializeRootConfig(root: RootConfig): StoredRootConfig {
     profiles[name] = serializeProfileConfig(profile);
   }
   const migrations = normalizeRootMigrations(root.migrations);
+  const cdAliases = normalizeCdAliases(root.cdAliases);
   return {
     schemaVersion: 2,
     activeProfile: root.activeProfile,
     preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
     ...(migrations ? { migrations } : {}),
+    ...(Object.keys(cdAliases).length > 0 ? { cdAliases } : {}),
     profiles,
   };
 }
