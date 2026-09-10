@@ -197,6 +197,15 @@ describe('/cd alias shortcuts', () => {
     expect(saved?.cdAliases).toBeUndefined();
   });
 
+  it('surfaces /cdset in the /help card', async () => {
+    const h = await createHarness();
+
+    await expect(h.run('/help')).resolves.toBe(true);
+    const content = h.channel.sent.at(-1)?.content as Record<string, unknown> | undefined;
+    expect(content).toBeTypeOf('object');
+    expect(JSON.stringify(content)).toContain('/cdset');
+  });
+
   it('preserves /cd shortcuts when another config op rewrites the root', async () => {
     const h = await createHarness();
     const target = join(h.tmp.root, 'aiops');
